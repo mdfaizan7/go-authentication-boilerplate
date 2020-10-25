@@ -2,8 +2,8 @@ package database
 
 import (
 	"fmt"
+	"go-authentication-boilerplate/models"
 	"log"
-	"notion-clone/server/models"
 	"os"
 
 	"github.com/joho/godotenv"

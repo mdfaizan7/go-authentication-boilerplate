@@ -1,4 +1,4 @@
-module notion-clone/server
+module go-authentication-boilerplate
 
 go 1.15
 

@@ -3,8 +3,8 @@ package main
 import (
 	"log"
 
-	"notion-clone/server/database"
-	"notion-clone/server/router"
+	"go-authentication-boilerplate/database"
+	"go-authentication-boilerplate/router"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"

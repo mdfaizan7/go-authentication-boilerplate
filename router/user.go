@@ -1,8 +1,8 @@
 package router
 
 import (
-	db "notion-clone/server/database"
-	"notion-clone/server/models"
+	db "go-authentication-boilerplate/database"
+	"go-authentication-boilerplate/models"
 
 	"golang.org/x/crypto/bcrypt"
 

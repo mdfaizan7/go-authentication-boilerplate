@@ -1,7 +1,7 @@
 package router
 
 import (
-	"notion-clone/server/models"
+	"go-authentication-boilerplate/models"
 	"regexp"
 
 	valid "github.com/asaskevich/govalidator"
