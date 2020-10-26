@@ -3,6 +3,8 @@ package router
 import (
 	db "go-authentication-boilerplate/database"
 	"go-authentication-boilerplate/models"
+	"go-authentication-boilerplate/util"
+	"math/rand"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -19,42 +21,36 @@ func CreateUser(c *fiber.Ctx) error {
 	u := new(models.User)
 
 	if err := c.BodyParser(u); err != nil {
-		return c.JSON(`{"error":true, "input":"Please review your input"`)
+		return c.JSON(fiber.Map{"error": true, "input": "Please review your input"})
 	}
 
 	// validate if the email, username and password are in correct format
-	errors := ValidateRegister(u)
+	errors := util.ValidateRegister(u)
 	if errors.Err {
 		return c.JSON(errors)
 	}
 
-	// validate if email and username are unique
-	user := new(models.User)
-	db.DB.Where(&models.User{Email: u.Email}).Find(&user)
-	if u.Email == user.Email {
+	if count := db.DB.Where(&models.User{Email: u.Email}).First(new(models.User)).RowsAffected; count > 0 {
 		errors.Err, errors.Email = true, "Email is already registered"
 	}
-	user = new(models.User)
-	db.DB.Where(&models.User{Username: u.Username}).Find(&user)
-	if u.Username == user.Username {
+	if count := db.DB.Where(&models.User{Username: u.Username}).First(new(models.User)).RowsAffected; count > 0 {
 		errors.Err, errors.Username = true, "Username is already registered"
 	}
-
 	if errors.Err {
 		return c.JSON(errors)
 	}
 
-	// Hashing the password with the default cost of 10
+	// Hashing the password with a random salt
 	password := []byte(u.Password)
-	hashedPassword, err := bcrypt.GenerateFromPassword(password, 12)
+	hashedPassword, err := bcrypt.GenerateFromPassword(password, rand.Intn(bcrypt.MaxCost-bcrypt.MinCost)+bcrypt.MinCost)
 	if err != nil {
 		panic(err)
 	}
 	u.Password = string(hashedPassword)
 
-	db.DB.Create(&u)
+	if err := db.DB.Create(&u).Error; err != nil {
+		return c.JSON(fiber.Map{"error": true, "general": "Something went wrong, please try again later. 😕"})
+	}
 
 	return c.JSON(u)
 }
-
-//
