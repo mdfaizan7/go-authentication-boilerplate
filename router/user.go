@@ -16,6 +16,12 @@ import (
 func SetupUserRoutes() {
 	USER.Post("/signup", CreateUser) // Sign Up a user
 	USER.Post("/signin", LoginUser)  // Sign In a user
+
+	// privUser handles all the private user routes that requires authentication
+	privUser := USER.Group("/private")
+	privUser.Use(util.SecureAuth())
+	privUser.Get("/user", GetUserData)
+
 }
 
 // CreateUser route registers a User into the database
@@ -60,8 +66,7 @@ func CreateUser(c *fiber.Ctx) error {
 	c.Cookie(accessCookie)
 	c.Cookie(refreshCookie)
 
-	return c.SendString("User registered successfully")
-
+	return c.Status(fiber.StatusOK).SendString("User registered successfully")
 }
 
 // LoginUser route logins a user in the app
@@ -93,8 +98,19 @@ func LoginUser(c *fiber.Ctx) error {
 	c.Cookie(accessCookie)
 	c.Cookie(refreshCookie)
 
-	return c.SendString("User succesfullt logged in")
+	return c.Status(fiber.StatusOK).SendString("User succesfully logged in")
+}
 
+// GetUserData returns the details of the user signed in
+func GetUserData(c *fiber.Ctx) error {
+	id := c.Locals("id")
+
+	u := new(models.User)
+	if res := db.DB.Where("uuid = ?", id).First(&u); res.RowsAffected <= 0 {
+		return c.JSON(fiber.Map{"error": true, "general": "Cannot find the User"})
+	}
+
+	return c.JSON(u)
 }
 
 func getAuthCookies(accessToken, refreshToken string) (*fiber.Cookie, *fiber.Cookie) {
