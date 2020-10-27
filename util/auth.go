@@ -10,6 +10,14 @@ import (
 
 var jwtKey = []byte(db.PRIVKEY)
 
+// GenerateTokens generates the access and refresh tokens
+func GenerateTokens(u *models.User) (string, string) {
+	claim, accessToken := GenerateClaims(u)
+	refreshToken := GenerateRefreshClaims(claim)
+
+	return accessToken, refreshToken
+}
+
 // GenerateClaims generates jwt token
 func GenerateClaims(u *models.User) (*models.Claims, string) {
 
@@ -44,7 +52,7 @@ func GenerateRefreshClaims(cl *models.Claims) string {
 	refreshClaim := &models.Claims{
 		StandardClaims: jwt.StandardClaims{
 			Issuer:    cl.Issuer,
-			ExpiresAt: t.Add(30 * 24 * time.Hour).Unix(),
+			ExpiresAt: t.Add(10 * 24 * time.Hour).Unix(),
 			Subject:   "refresh_token",
 			IssuedAt:  t.Unix(),
 		},
