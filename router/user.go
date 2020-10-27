@@ -52,5 +52,8 @@ func CreateUser(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"error": true, "general": "Something went wrong, please try again later. 😕"})
 	}
 
-	return c.JSON(u)
+	claim, token := util.GenerateClaims(u)
+	refreshToken := util.GenerateRefreshClaims(claim)
+
+	return c.JSON(fiber.Map{"token": token, "refresh_token": refreshToken})
 }
