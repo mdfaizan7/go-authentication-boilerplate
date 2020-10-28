@@ -12,25 +12,26 @@ import (
 var jwtKey = []byte(db.PRIVKEY)
 
 // GenerateTokens generates the access and refresh tokens
-func GenerateTokens(u *models.User) (string, string) {
-	claim, accessToken := GenerateClaims(u)
+func GenerateTokens(uuid string) (string, string) {
+	claim, accessToken := GenerateAccessClaims(uuid)
 	refreshToken := GenerateRefreshClaims(claim)
 
 	return accessToken, refreshToken
 }
 
-// GenerateClaims generates jwt token
-func GenerateClaims(u *models.User) (*models.Claims, string) {
+// GenerateAccessClaims returns a claim and a acess_token string
+func GenerateAccessClaims(uuid string) (*models.Claims, string) {
 
 	t := time.Now()
 	claim := &models.Claims{
 		StandardClaims: jwt.StandardClaims{
-			Issuer:    u.UUID.String(),
-			ExpiresAt: t.Add(30 * time.Minute).Unix(),
+			Issuer:    uuid,
+			ExpiresAt: t.Add(1 * time.Hour).Unix(),
 			Subject:   "access_token",
 			IssuedAt:  t.Unix(),
 		},
 	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claim)
 	tokenString, err := token.SignedString(jwtKey)
 	if err != nil {
@@ -40,9 +41,14 @@ func GenerateClaims(u *models.User) (*models.Claims, string) {
 	return claim, tokenString
 }
 
-// GenerateRefreshClaims generates refresh tokens
+// GenerateRefreshClaims returns refresh_token
 func GenerateRefreshClaims(cl *models.Claims) string {
-	result := db.DB.Where(&models.Claims{StandardClaims: jwt.StandardClaims{Issuer: cl.Issuer}}).Find(&models.Claims{})
+	result := db.DB.Where(&models.Claims{
+		StandardClaims: jwt.StandardClaims{
+			Issuer: cl.Issuer,
+		},
+	}).Find(&models.Claims{})
+
 	// checking the number of refresh tokens stored.
 	// If the number is higher than 3, remove all the refresh tokens and leave only new one.
 	if result.RowsAffected > 3 {
@@ -71,18 +77,19 @@ func GenerateRefreshClaims(cl *models.Claims) string {
 	return refreshTokenString
 }
 
-// SecureAuth is a middleware which secures all the private routes
+// SecureAuth returns a middleware which secures all the private routes
 func SecureAuth() func(*fiber.Ctx) error {
 	return func(c *fiber.Ctx) error {
 		accessToken := c.Get("access_token")
 		claims := new(models.Claims)
-		token, err := jwt.ParseWithClaims(accessToken, claims, func(token *jwt.Token) (interface{}, error) {
-			return jwtKey, nil
-		})
+		token, err := jwt.ParseWithClaims(accessToken, claims,
+			func(token *jwt.Token) (interface{}, error) {
+				return jwtKey, nil
+			})
 
 		if token.Valid {
 			if claims.ExpiresAt < time.Now().Unix() {
-				return c.Status(401).JSON(fiber.Map{
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 					"error":   true,
 					"general": "Token Expired",
 				})
@@ -105,4 +112,25 @@ func SecureAuth() func(*fiber.Ctx) error {
 		c.Locals("id", claims.Issuer)
 		return c.Next()
 	}
+}
+
+// GetAuthCookies sends two cookies of type access_token and refresh_token
+func GetAuthCookies(accessToken, refreshToken string) (*fiber.Cookie, *fiber.Cookie) {
+	accessCookie := &fiber.Cookie{
+		Name:     "access_token",
+		Value:    accessToken,
+		Expires:  time.Now().Add(24 * time.Hour),
+		HTTPOnly: true,
+		Secure:   true,
+	}
+
+	refreshCookie := &fiber.Cookie{
+		Name:     "refresh_token",
+		Value:    refreshToken,
+		Expires:  time.Now().Add(10 * 24 * time.Hour),
+		HTTPOnly: true,
+		Secure:   true,
+	}
+
+	return accessCookie, refreshCookie
 }

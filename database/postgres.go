@@ -39,10 +39,10 @@ func ConnectToDB() {
 	}
 	log.Println("connected")
 
+	// turned on the loger on info mode
+	DB.Logger = logger.Default.LogMode(logger.Info)
+
 	log.Print("Running the migrations...")
 	DB.AutoMigrate(&models.User{}, &models.Claims{})
-	log.Println("done")
 
-	DB.Logger = logger.Default.LogMode(logger.Info)
-	log.Println("Log Mode:", true)
 }

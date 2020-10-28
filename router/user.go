@@ -9,17 +9,21 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/dgrijalva/jwt-go"
 	"github.com/gofiber/fiber/v2"
 )
 
+var jwtKey = []byte(db.PRIVKEY)
+
 // SetupUserRoutes func sets up all the user routes
 func SetupUserRoutes() {
-	USER.Post("/signup", CreateUser) // Sign Up a user
-	USER.Post("/signin", LoginUser)  // Sign In a user
+	USER.Post("/signup", CreateUser)              // Sign Up a user
+	USER.Post("/signin", LoginUser)               // Sign In a user
+	USER.Get("/get-access-token", GetAccessToken) // returns a new access_token
 
 	// privUser handles all the private user routes that requires authentication
 	privUser := USER.Group("/private")
-	privUser.Use(util.SecureAuth())
+	privUser.Use(util.SecureAuth()) // middleware to secure all routes for this group
 	privUser.Get("/user", GetUserData)
 
 }
@@ -29,7 +33,10 @@ func CreateUser(c *fiber.Ctx) error {
 	u := new(models.User)
 
 	if err := c.BodyParser(u); err != nil {
-		return c.JSON(fiber.Map{"error": true, "input": "Please review your input"})
+		return c.JSON(fiber.Map{
+			"error": true,
+			"input": "Please review your input",
+		})
 	}
 
 	// validate if the email, username and password are in correct format
@@ -50,23 +57,33 @@ func CreateUser(c *fiber.Ctx) error {
 
 	// Hashing the password with a random salt
 	password := []byte(u.Password)
-	hashedPassword, err := bcrypt.GenerateFromPassword(password, rand.Intn(bcrypt.MaxCost-bcrypt.MinCost)+bcrypt.MinCost)
+	hashedPassword, err := bcrypt.GenerateFromPassword(
+		password,
+		rand.Intn(bcrypt.MaxCost-bcrypt.MinCost)+bcrypt.MinCost,
+	)
+
 	if err != nil {
 		panic(err)
 	}
 	u.Password = string(hashedPassword)
 
 	if err := db.DB.Create(&u).Error; err != nil {
-		return c.JSON(fiber.Map{"error": true, "general": "Something went wrong, please try again later. 😕"})
+		return c.JSON(fiber.Map{
+			"error":   true,
+			"general": "Something went wrong, please try again later. 😕",
+		})
 	}
 
 	// setting up the authorization cookies
-	accessToken, refreshToken := util.GenerateTokens(u)
-	accessCookie, refreshCookie := getAuthCookies(accessToken, refreshToken)
+	accessToken, refreshToken := util.GenerateTokens(u.UUID.String())
+	accessCookie, refreshCookie := util.GetAuthCookies(accessToken, refreshToken)
 	c.Cookie(accessCookie)
 	c.Cookie(refreshCookie)
 
-	return c.Status(fiber.StatusOK).SendString("User registered successfully")
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"access_token":  accessToken,
+		"refresh_token": refreshToken,
+	})
 }
 
 // LoginUser route logins a user in the app
@@ -83,7 +100,10 @@ func LoginUser(c *fiber.Ctx) error {
 	}
 
 	u := new(models.User)
-	if res := db.DB.Where(&models.User{Email: input.Identity}).Or(&models.User{Username: input.Identity}).First(&u); res.RowsAffected <= 0 {
+	if res := db.DB.Where(
+		&models.User{Email: input.Identity}).Or(
+		&models.User{Username: input.Identity},
+	).First(&u); res.RowsAffected <= 0 {
 		return c.JSON(fiber.Map{"error": true, "general": "Invalid Credentials."})
 	}
 
@@ -93,13 +113,73 @@ func LoginUser(c *fiber.Ctx) error {
 	}
 
 	// setting up the authorization cookies
-	accessToken, refreshToken := util.GenerateTokens(u)
-	accessCookie, refreshCookie := getAuthCookies(accessToken, refreshToken)
+	accessToken, refreshToken := util.GenerateTokens(u.UUID.String())
+	accessCookie, refreshCookie := util.GetAuthCookies(accessToken, refreshToken)
 	c.Cookie(accessCookie)
 	c.Cookie(refreshCookie)
 
-	return c.Status(fiber.StatusOK).SendString("User succesfully logged in")
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"access_token":  accessToken,
+		"refresh_token": refreshToken,
+	})
 }
+
+// GetAccessToken generates and sends a new access token iff there is a valid refresh token
+func GetAccessToken(c *fiber.Ctx) error {
+	type RefreshToken struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+
+	reToken := new(RefreshToken)
+	if err := c.BodyParser(reToken); err != nil {
+		return c.JSON(fiber.Map{"error": true, "input": "Please review your input"})
+	}
+
+	refreshToken := reToken.RefreshToken
+
+	refreshClaims := new(models.Claims)
+	token, _ := jwt.ParseWithClaims(refreshToken, refreshClaims,
+		func(token *jwt.Token) (interface{}, error) {
+			return jwtKey, nil
+		})
+
+	if res := db.DB.Where(
+		"expires_at = ? AND issued_at = ? AND issuer = ?",
+		refreshClaims.ExpiresAt, refreshClaims.IssuedAt, refreshClaims.Issuer,
+	).First(&models.Claims{}); res.RowsAffected <= 0 {
+		// no such refresh token exist in the database
+		c.ClearCookie("access_token", "refresh_token")
+		return c.SendStatus(fiber.StatusForbidden)
+	}
+
+	if token.Valid {
+		if refreshClaims.ExpiresAt < time.Now().Unix() {
+			// refresh token is expired
+			c.ClearCookie("access_token", "refresh_token")
+			return c.SendStatus(fiber.StatusForbidden)
+		}
+	} else {
+		// malformed refresh token
+		c.ClearCookie("access_token", "refresh_token")
+		return c.SendStatus(fiber.StatusForbidden)
+	}
+
+	_, accessToken := util.GenerateAccessClaims(refreshClaims.Issuer)
+
+	c.Cookie(&fiber.Cookie{
+		Name:     "access_token",
+		Value:    accessToken,
+		Expires:  time.Now().Add(24 * time.Hour),
+		HTTPOnly: true,
+		Secure:   true,
+	})
+
+	return c.JSON(fiber.Map{"access_token": accessToken})
+}
+
+/*
+	PRIVATE ROUTES
+*/
 
 // GetUserData returns the details of the user signed in
 func GetUserData(c *fiber.Ctx) error {
@@ -111,24 +191,4 @@ func GetUserData(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(u)
-}
-
-func getAuthCookies(accessToken, refreshToken string) (*fiber.Cookie, *fiber.Cookie) {
-	accessCookie := &fiber.Cookie{
-		Name:     "access_token",
-		Value:    accessToken,
-		Expires:  time.Now().Add(24 * time.Hour),
-		HTTPOnly: true,
-		Secure:   true,
-	}
-
-	refreshCookie := &fiber.Cookie{
-		Name:     "refresh_token",
-		Value:    refreshToken,
-		Expires:  time.Now().Add(15 * 24 * time.Hour),
-		HTTPOnly: true,
-		Secure:   true,
-	}
-
-	return accessCookie, refreshCookie
 }
